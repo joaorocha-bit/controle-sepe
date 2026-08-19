@@ -80,6 +80,48 @@ LABELS = {
 
 NUMERIC_FIELDS = [f for f in CELL_MAP if f not in ("locais_municipios_origem", "local_origem_transferencia")]
 
+# Pares "elegível x efetivado" para o comparativo com % de execução.
+# (rótulo exibido, campo do elegível, campo do efetivado)
+COMPARISONS = [
+    ("Pacientes elegíveis x Efetivados", "pacientes_elegiveis", "pacientes_efetivados"),
+    ("Emergência Adulta: Elegíveis x Efetivados", "elegib_emerg_adulta", "efetivados_emerg_adulta"),
+    ("Emergência Pediátrica: Elegíveis x Efetivados", "elegib_emerg_pediatrica", "efetivados_emerg_pediatrica"),
+    ("Internações Eletivas: Solicitadas x Efetivadas", "internacoes_eletivas", "internacoes_eletivas_efetivadas"),
+]
+
+
+def calc_pct(elegivel, efetivado):
+    """% de execução = efetivado / elegível * 100 (0 se elegível for 0)."""
+    if elegivel and elegivel > 0:
+        return (efetivado / elegivel) * 100
+    return 0.0
+
+
+def render_comparisons(source, container=st):
+    """Renderiza os 4 comparativos elegível x efetivado x % de execução.
+    `source` pode ser uma Series (um dia) ou um dict/Series de totais."""
+    for label, campo_elegivel, campo_efetivado in COMPARISONS:
+        elegivel = float(source[campo_elegivel])
+        efetivado = float(source[campo_efetivado])
+        pct = calc_pct(elegivel, efetivado)
+
+        container.markdown(f"**{label}**")
+        c1, c2, c3 = container.columns(3)
+        c1.metric("Elegíveis", int(elegivel))
+        c2.metric("Efetivados", int(efetivado))
+        c3.metric("% de execução", f"{pct:.0f}%")
+
+        fig = px.bar(
+            x=["Elegíveis", "Efetivados"],
+            y=[elegivel, efetivado],
+            text=[int(elegivel), int(efetivado)],
+            labels={"x": "", "y": ""},
+        )
+        fig.update_traces(textposition="outside")
+        fig.update_layout(height=220, margin=dict(t=10, b=10, l=10, r=10), showlegend=False)
+        container.plotly_chart(fig, use_container_width=True)
+        container.divider()
+
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets.readonly",
     "https://www.googleapis.com/auth/drive.readonly",
