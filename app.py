@@ -112,9 +112,9 @@ def render_comparisons(source, container=st, key_prefix="cmp"):
 
         container.markdown(f"**{label}**")
         c1, c2, c3 = container.columns(3)
-        c1.metric("Elegíveis", int(elegivel), key=f"{chart_key}_m1")
-        c2.metric("Efetivados", int(efetivado), key=f"{chart_key}_m2")
-        c3.metric("% de execução", f"{pct:.0f}%", key=f"{chart_key}_m3")
+        c1.metric("Elegíveis", int(elegivel))
+        c2.metric("Efetivados", int(efetivado))
+        c3.metric("% de execução", f"{pct:.0f}%")
 
         fig = px.bar(
             x=["Elegíveis", "Efetivados"],
