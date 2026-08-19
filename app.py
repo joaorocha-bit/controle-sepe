@@ -97,19 +97,24 @@ def calc_pct(elegivel, efetivado):
     return 0.0
 
 
-def render_comparisons(source, container=st):
+def render_comparisons(source, container=st, key_prefix="cmp"):
     """Renderiza os 4 comparativos elegível x efetivado x % de execução.
-    `source` pode ser uma Series (um dia) ou um dict/Series de totais."""
+    `source` pode ser uma Series (um dia) ou um dict/Series de totais.
+    `key_prefix` precisa ser único por chamada (ex: "geral", "dia_2026-08-01"),
+    para o Streamlit não reclamar de elementos duplicados quando a função
+    é usada mais de uma vez na mesma página."""
     for label, campo_elegivel, campo_efetivado in COMPARISONS:
         elegivel = float(source[campo_elegivel])
         efetivado = float(source[campo_efetivado])
         pct = calc_pct(elegivel, efetivado)
 
+        chart_key = f"{key_prefix}_{campo_elegivel}_{campo_efetivado}"
+
         container.markdown(f"**{label}**")
         c1, c2, c3 = container.columns(3)
-        c1.metric("Elegíveis", int(elegivel))
-        c2.metric("Efetivados", int(efetivado))
-        c3.metric("% de execução", f"{pct:.0f}%")
+        c1.metric("Elegíveis", int(elegivel), key=f"{chart_key}_m1")
+        c2.metric("Efetivados", int(efetivado), key=f"{chart_key}_m2")
+        c3.metric("% de execução", f"{pct:.0f}%", key=f"{chart_key}_m3")
 
         fig = px.bar(
             x=["Elegíveis", "Efetivados"],
@@ -119,7 +124,7 @@ def render_comparisons(source, container=st):
         )
         fig.update_traces(textposition="outside")
         fig.update_layout(height=220, margin=dict(t=10, b=10, l=10, r=10), showlegend=False)
-        container.plotly_chart(fig, use_container_width=True)
+        container.plotly_chart(fig, use_container_width=True, key=chart_key)
         container.divider()
 
 SCOPES = [
@@ -298,7 +303,7 @@ with tab_geral:
     st.divider()
 
     st.markdown("### Comparativo: Elegíveis x Efetivados (mês)")
-    render_comparisons(totals)
+    render_comparisons(totals, key_prefix="geral")
 
     st.markdown("**Totais detalhados do mês**")
     totals_df = pd.DataFrame({
@@ -352,7 +357,7 @@ with tab_dia:
     st.divider()
 
     st.markdown("### Comparativo: Elegíveis x Efetivados (dia)")
-    render_comparisons(row)
+    render_comparisons(row, key_prefix=f"dia_{dia_escolhido.isoformat()}")
 
     detalhe = pd.DataFrame({
         "Indicador": [LABELS[f] for f in NUMERIC_FIELDS],
