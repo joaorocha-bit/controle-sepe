@@ -32,8 +32,15 @@ from google.oauth2.service_account import Credentials
 
 # Endereço de cada informação dentro de CADA aba (uma aba = um dia).
 # Se algum número aparecer "deslocado" no seu dashboard, o ajuste é aqui.
+#
+# Aceita dois formatos:
+#   - uma célula única, ex: "B2"
+#   - um intervalo, ex: "B1:D1" — usado para campos que estão em células
+#     MESCLADAS: o Google Sheets só guarda o valor na célula mais à
+#     esquerda da mesclagem, então o código varre o intervalo inteiro e
+#     usa o primeiro valor não vazio que encontrar.
 CELL_MAP = {
-    "elegibilidades_realizadas": "C1",
+    "elegibilidades_realizadas": "B1:D1",
     "pacientes_elegiveis": "B2",
     "pacientes_efetivados": "D2",
     "elegib_emerg_adulta": "B3",
@@ -44,12 +51,12 @@ CELL_MAP = {
     "internacoes_eletivas_efetivadas": "D5",
     "efetivados_co": "B6",
     "efetivados_mater": "D6",
-    "pacientes_qt_autorizados": "C7",
-    "efetivados_ui": "C8",
-    "efetivados_ctia": "C9",
-    "efetivados_utip": "C10",
-    "locais_municipios_origem": "B11",
-    "local_origem_transferencia": "C12",
+    "pacientes_qt_autorizados": "B7:D7",
+    "efetivados_ui": "B8:D8",
+    "efetivados_ctia": "B9:D9",
+    "efetivados_utip": "B10:D10",
+    "locais_municipios_origem": "B11:D11",
+    "local_origem_transferencia": "B12:D12",
 }
 
 # Rótulos amigáveis para exibir na tela
@@ -108,6 +115,28 @@ def _cell_ref_to_rowcol(ref: str):
     return gspread.utils.a1_to_rowcol(ref)
 
 
+def _read_field(values, ref: str) -> str:
+    """Lê o valor de uma célula única ("B2") ou o primeiro valor não vazio
+    dentro de um intervalo ("B1:D1"). O intervalo é usado para campos que
+    ficam em células mescladas, já que o Sheets só grava o conteúdo na
+    célula mais à esquerda da mesclagem."""
+    if ":" in ref:
+        start_ref, end_ref = ref.split(":")
+        r1, c1 = _cell_ref_to_rowcol(start_ref)
+        r2, c2 = _cell_ref_to_rowcol(end_ref)
+    else:
+        r1, c1 = _cell_ref_to_rowcol(ref)
+        r2, c2 = r1, c1
+
+    for r in range(r1, r2 + 1):
+        for c in range(c1, c2 + 1):
+            if r - 1 < len(values) and c - 1 < len(values[r - 1]):
+                val = values[r - 1][c - 1].strip()
+                if val:
+                    return val
+    return ""
+
+
 def parse_day_from_title(title: str, month: int, year: int):
     """Tenta interpretar o nome da aba como um dia do mês selecionado."""
     t = title.strip()
@@ -152,11 +181,7 @@ def load_data(month: int, year: int):
         record = {"data": day, "aba": ws.title}
 
         for field, ref in CELL_MAP.items():
-            r, c = _cell_ref_to_rowcol(ref)
-            raw = ""
-            if r - 1 < len(values) and c - 1 < len(values[r - 1]):
-                raw = values[r - 1][c - 1]
-            record[field] = raw.strip()
+            record[field] = _read_field(values, ref)
 
         rows.append(record)
 
