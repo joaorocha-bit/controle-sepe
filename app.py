@@ -297,6 +297,9 @@ with tab_geral:
 
     st.divider()
 
+    st.markdown("### Comparativo: Elegíveis x Efetivados (mês)")
+    render_comparisons(totals)
+
     st.markdown("**Totais detalhados do mês**")
     totals_df = pd.DataFrame({
         "Indicador": [LABELS[f] for f in NUMERIC_FIELDS],
@@ -347,6 +350,10 @@ with tab_dia:
     c3.metric(LABELS["pacientes_efetivados"], int(row["pacientes_efetivados"]))
 
     st.divider()
+
+    st.markdown("### Comparativo: Elegíveis x Efetivados (dia)")
+    render_comparisons(row)
+
     detalhe = pd.DataFrame({
         "Indicador": [LABELS[f] for f in NUMERIC_FIELDS],
         "Valor": [int(row[f]) for f in NUMERIC_FIELDS],
