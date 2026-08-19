@@ -138,6 +138,7 @@ def render_value_counts(df, col, label, container=st):
 
 
 def render_group_breakdown(df, dim_col, value_col, container=st):
+    """Conta ocorrências de value_col segregadas por dim_col e exibe em formato de tabela."""
     if value_col not in df.columns:
         container.warning(f"Coluna '{value_col}' não encontrada na planilha.")
         return
@@ -145,6 +146,8 @@ def render_group_breakdown(df, dim_col, value_col, container=st):
     data = df[[dim_col, value_col]].copy()
     data[dim_col] = data[dim_col].astype(str).str.strip()
     data[value_col] = data[value_col].astype(str).str.strip()
+    
+    # Remove as linhas onde a dimensão principal (ex: cidade) está vazia
     data = data[data[dim_col] != ""]
     data[value_col] = data[value_col].replace("", "(vazio)")
 
@@ -152,18 +155,21 @@ def render_group_breakdown(df, dim_col, value_col, container=st):
         container.info("Sem dados preenchidos para essa segregação.")
         return
 
-    counts = data.groupby([dim_col, value_col]).size().reset_index(name="Quantidade")
-    fig = px.bar(
-        counts, x="Quantidade", y=dim_col, color=value_col,
-        orientation="h", barmode="group",
-        labels={dim_col: "", value_col: ""},
-    )
-    fig.update_layout(
-        height=max(280, 42 * counts[dim_col].nunique()),
-        legend_title_text="",
-        margin=dict(t=10, b=10, l=10, r=10),
-    )
-    container.plotly_chart(fig, use_container_width=True)
+    # Cria uma tabela cruzada (Pivot)
+    # Linhas: a dimensão escolhida (ex: Local de origem)
+    # Colunas: as respostas (ex: Sim, Não, (vazio))
+    tabela = pd.crosstab(data[dim_col], data[value_col])
+    
+    # Adiciona uma coluna 'Total' para ordenar dos locais mais frequentes pros menos
+    tabela['Total'] = tabela.sum(axis=1)
+    tabela = tabela.sort_values('Total', ascending=False)
+    
+    # Tira o index para que a dimensão apareça como uma coluna limpa na tabela
+    tabela = tabela.reset_index()
+    tabela.columns.name = None
+    
+    # Exibe no Streamlit como uma tabela iterativa
+    container.dataframe(tabela, use_container_width=True, hide_index=True)
 
 
 def classify_acomodacao(row):
