@@ -8,8 +8,7 @@ Como funciona:
 2. Varre todas as abas da planilha, tenta interpretar o nome de cada aba
    como um dia do mês (ex: "1", "01", "01/08", "01/08/2026" ...).
 3. Para cada aba reconhecida como um dia, lê os valores nas células fixas
-   definidas em CELL_MAP (ajuste esse dicionário se o layout da sua
-   planilha for um pouco diferente do modelo).
+   definidas em CELL_MAP.
 4. Monta um DataFrame com uma linha por dia e usa isso para alimentar
    3 visões: Visão Geral, Por Dia, Por Local.
 """
@@ -30,15 +29,6 @@ from google.oauth2.service_account import Credentials
 # CONFIGURAÇÃO — ajuste aqui se o layout da sua planilha mudar
 # ---------------------------------------------------------------------------
 
-# Endereço de cada informação dentro de CADA aba (uma aba = um dia).
-# Se algum número aparecer "deslocado" no seu dashboard, o ajuste é aqui.
-#
-# Aceita dois formatos:
-#   - uma célula única, ex: "B2"
-#   - um intervalo, ex: "B1:D1" — usado para campos que estão em células
-#     MESCLADAS: o Google Sheets só guarda o valor na célula mais à
-#     esquerda da mesclagem, então o código varre o intervalo inteiro e
-#     usa o primeiro valor não vazio que encontrar.
 CELL_MAP = {
     "elegibilidades_realizadas": "B1:D1",
     "pacientes_elegiveis": "B2",
@@ -55,17 +45,15 @@ CELL_MAP = {
     "efetivados_ui": "B8:D8",
     "efetivados_ctia": "B9:D9",
     "efetivados_utip": "B10:D10",
-    "locais_municipios_origem": "B11:P11",
-    "local_origem_transferencia": "B12:P12",
+    # AJUSTE AQUI: Aumentamos o range de P para Z, assim ele pega as cidades sequenciais "pro lado"
+    "locais_municipios_origem": "B11:Z11",
+    "local_origem_transferencia": "B12:Z12",
 }
 
 # Campos cujas células NÃO são mescladas: a informação é digitada em
 # sequência, uma por célula, indo para o lado (ex: B11="Cidade A",
 # C11="Cidade B", D11="Cidade C" ...). Para esses campos juntamos TODOS os
-# valores não vazios do intervalo (em vez de pegar só o primeiro, como é
-# feito nos campos de célula mesclada, ex: "Elegibilidades realizadas").
-# Se a sequência na sua planilha for além da coluna P, só aumentar a letra
-# final do intervalo acima (ex: "B11:Z11").
+# valores não vazios do intervalo.
 SEQUENCE_FIELDS = ["locais_municipios_origem", "local_origem_transferencia"]
 
 # Rótulos amigáveis para exibir na tela
@@ -87,10 +75,9 @@ LABELS = {
     "efetivados_utip": "Pacientes efetivados na UTIP",
 }
 
-NUMERIC_FIELDS = [f for f in CELL_MAP if f not in ("locais_municipios_origem", "local_origem_transferencia")]
+NUMERIC_FIELDS = [f for f in CELL_MAP if f not in SEQUENCE_FIELDS]
 
 # Pares "elegível x efetivado" para o comparativo com % de execução.
-# (rótulo exibido, campo do elegível, campo do efetivado)
 COMPARISONS = [
     ("Pacientes elegíveis x Efetivados", "pacientes_elegiveis", "pacientes_efetivados"),
     ("Emergência Adulta: Elegíveis x Efetivados", "elegib_emerg_adulta", "efetivados_emerg_adulta"),
@@ -107,11 +94,6 @@ def calc_pct(elegivel, efetivado):
 
 
 def render_comparisons(source, container=st, key_prefix="cmp"):
-    """Renderiza os 4 comparativos elegível x efetivado x % de execução.
-    `source` pode ser uma Series (um dia) ou um dict/Series de totais.
-    `key_prefix` precisa ser único por chamada (ex: "geral", "dia_2026-08-01"),
-    para o Streamlit não reclamar de elementos duplicados quando a função
-    é usada mais de uma vez na mesma página."""
     for label, campo_elegivel, campo_efetivado in COMPARISONS:
         elegivel = float(source[campo_elegivel])
         efetivado = float(source[campo_efetivado])
@@ -173,9 +155,7 @@ def _cell_ref_to_rowcol(ref: str):
 
 def _read_field(values, ref: str) -> str:
     """Lê o valor de uma célula única ("B2") ou o primeiro valor não vazio
-    dentro de um intervalo ("B1:D1"). O intervalo é usado para campos que
-    ficam em células mescladas, já que o Sheets só grava o conteúdo na
-    célula mais à esquerda da mesclagem."""
+    dentro de um intervalo ("B1:D1")."""
     if ":" in ref:
         start_ref, end_ref = ref.split(":")
         r1, c1 = _cell_ref_to_rowcol(start_ref)
@@ -195,11 +175,9 @@ def _read_field(values, ref: str) -> str:
 
 def _read_field_sequence(values, ref: str, sep: str = "; ") -> str:
     """Como _read_field, mas para linhas onde cada célula do intervalo tem
-    UM valor diferente (ex: B11='Cidade A', C11='Cidade B', D11='Cidade C'),
-    ao invés de ser uma única célula mesclada. Junta todos os valores não
-    vazios encontrados, na ordem em que aparecem, separados por `sep`."""
+    UM valor diferente (ex: B11='Cidade A', C11='Cidade B', D11='Cidade C').
+    Junta todos os valores não vazios encontrados."""
     if ":" not in ref:
-        # célula única — comportamento igual ao _read_field
         r, c = _cell_ref_to_rowcol(ref)
         if r - 1 < len(values) and c - 1 < len(values[r - 1]):
             return values[r - 1][c - 1].strip()
