@@ -55,9 +55,18 @@ CELL_MAP = {
     "efetivados_ui": "B8:D8",
     "efetivados_ctia": "B9:D9",
     "efetivados_utip": "B10:D10",
-    "locais_municipios_origem": "B11:D11",
-    "local_origem_transferencia": "B12:D12",
+    "locais_municipios_origem": "B11:P11",
+    "local_origem_transferencia": "B12:P12",
 }
+
+# Campos cujas células NÃO são mescladas: a informação é digitada em
+# sequência, uma por célula, indo para o lado (ex: B11="Cidade A",
+# C11="Cidade B", D11="Cidade C" ...). Para esses campos juntamos TODOS os
+# valores não vazios do intervalo (em vez de pegar só o primeiro, como é
+# feito nos campos de célula mesclada, ex: "Elegibilidades realizadas").
+# Se a sequência na sua planilha for além da coluna P, só aumentar a letra
+# final do intervalo acima (ex: "B11:Z11").
+SEQUENCE_FIELDS = ["locais_municipios_origem", "local_origem_transferencia"]
 
 # Rótulos amigáveis para exibir na tela
 LABELS = {
@@ -184,6 +193,32 @@ def _read_field(values, ref: str) -> str:
     return ""
 
 
+def _read_field_sequence(values, ref: str, sep: str = "; ") -> str:
+    """Como _read_field, mas para linhas onde cada célula do intervalo tem
+    UM valor diferente (ex: B11='Cidade A', C11='Cidade B', D11='Cidade C'),
+    ao invés de ser uma única célula mesclada. Junta todos os valores não
+    vazios encontrados, na ordem em que aparecem, separados por `sep`."""
+    if ":" not in ref:
+        # célula única — comportamento igual ao _read_field
+        r, c = _cell_ref_to_rowcol(ref)
+        if r - 1 < len(values) and c - 1 < len(values[r - 1]):
+            return values[r - 1][c - 1].strip()
+        return ""
+
+    start_ref, end_ref = ref.split(":")
+    r1, c1 = _cell_ref_to_rowcol(start_ref)
+    r2, c2 = _cell_ref_to_rowcol(end_ref)
+
+    encontrados = []
+    for r in range(r1, r2 + 1):
+        for c in range(c1, c2 + 1):
+            if r - 1 < len(values) and c - 1 < len(values[r - 1]):
+                val = values[r - 1][c - 1].strip()
+                if val:
+                    encontrados.append(val)
+    return sep.join(encontrados)
+
+
 def parse_day_from_title(title: str, month: int, year: int):
     """Tenta interpretar o nome da aba como um dia do mês selecionado."""
     t = title.strip()
@@ -228,7 +263,10 @@ def load_data(month: int, year: int):
         record = {"data": day, "aba": ws.title}
 
         for field, ref in CELL_MAP.items():
-            record[field] = _read_field(values, ref)
+            if field in SEQUENCE_FIELDS:
+                record[field] = _read_field_sequence(values, ref)
+            else:
+                record[field] = _read_field(values, ref)
 
         rows.append(record)
 
