@@ -428,21 +428,50 @@ def inject_theme():
             color: var(--cc-muted);
         }
 
+        /* Espaçamento entre colunas/cards */
+        div[data-testid="stHorizontalBlock"]{
+            gap: 20px;
+            margin-bottom: 22px;
+        }
+
         /* Cards de KPI customizados */
         .kpi-card{
+            position: relative;
             background: linear-gradient(145deg, #0d1526, #0a0f1c);
             border: 1px solid var(--cc-border);
             border-radius: 14px;
-            padding: 18px 20px;
+            padding: 20px 22px;
             box-shadow: 0 0 18px rgba(0,229,255,0.06);
             height: 100%;
+            cursor: help;
+            transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+        .kpi-card:hover{
+            border-color: var(--cc-cyan);
+            box-shadow: 0 0 22px rgba(0,229,255,0.18);
         }
         .kpi-label{
+            display: flex;
+            align-items: center;
+            gap: 6px;
             color: var(--cc-muted);
             font-size: 0.75rem;
             text-transform: uppercase;
             letter-spacing: 1px;
-            margin-bottom: 6px;
+            margin-bottom: 8px;
+        }
+        .kpi-info-icon{
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            border: 1px solid var(--cc-muted);
+            color: var(--cc-muted);
+            font-size: 0.65rem;
+            font-style: normal;
+            flex-shrink: 0;
         }
         .kpi-value{
             font-family: "Courier New", monospace;
@@ -453,7 +482,38 @@ def inject_theme():
         .kpi-sub{
             color: var(--cc-muted);
             font-size: 0.75rem;
-            margin-top: 6px;
+            margin-top: 8px;
+        }
+
+        /* Tooltip customizado ao passar o mouse no card */
+        .kpi-card[data-tooltip]:hover::after{
+            content: attr(data-tooltip);
+            position: absolute;
+            bottom: calc(100% + 10px);
+            left: 50%;
+            transform: translateX(-50%);
+            background: #101a2e;
+            border: 1px solid var(--cc-border);
+            color: var(--cc-text);
+            padding: 10px 12px;
+            border-radius: 8px;
+            font-size: 0.72rem;
+            line-height: 1.35;
+            white-space: normal;
+            width: 230px;
+            text-align: left;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.55);
+            z-index: 100;
+        }
+        .kpi-card[data-tooltip]:hover::before{
+            content: "";
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            border: 6px solid transparent;
+            border-top-color: var(--cc-border);
+            z-index: 100;
         }
 
         .cc-clock{
@@ -478,11 +538,13 @@ def inject_theme():
     )
 
 
-def kpi_card(label, value, sublabel="", color="var(--cc-cyan)", container=st):
+def kpi_card(label, value, sublabel="", color="var(--cc-cyan)", tooltip="", container=st):
+    tooltip_attr = f'data-tooltip="{tooltip}"' if tooltip else ""
+    info_icon = '<span class="kpi-info-icon">i</span>' if tooltip else ""
     container.markdown(
         f"""
-        <div class="kpi-card">
-            <div class="kpi-label">{label}</div>
+        <div class="kpi-card" {tooltip_attr}>
+            <div class="kpi-label">{label}{info_icon}</div>
             <div class="kpi-value" style="color:{color};">{value}</div>
             <div class="kpi-sub">{sublabel}</div>
         </div>
@@ -547,11 +609,23 @@ def render_command_center(df_eletivos, skipped_tabs, df_elegiveis_full, mes, ano
         pct_execucao = calc_pct(elegivel, efetivado)
 
         c1, c2, c3, c4 = st.columns(4)
-        kpi_card("Internações Eletivas", int(elegivel), "solicitadas no mês", container=c1)
-        kpi_card("Efetivadas", int(efetivado), "internações realizadas", color="var(--cc-green)", container=c2)
-        kpi_card("% Execução", f"{pct_execucao:.0f}%", "solicitadas → efetivadas",
-                  color=status_color(pct_execucao), container=c3)
-        kpi_card("Pacientes QT Autorizados", int(totals["pacientes_qt_autorizados"]), "no mês", container=c4)
+        kpi_card(
+            "Internações Eletivas", int(elegivel), "solicitadas no mês", container=c1,
+            tooltip="Total de internações eletivas solicitadas no mês, somando os valores registrados em cada aba diária da planilha de Eletivos.",
+        )
+        kpi_card(
+            "Efetivadas", int(efetivado), "internações realizadas", color="var(--cc-green)", container=c2,
+            tooltip="Quantidade de internações eletivas que efetivamente aconteceram no mês (o paciente foi internado).",
+        )
+        kpi_card(
+            "% Execução", f"{pct_execucao:.0f}%", "solicitadas → efetivadas",
+            color=status_color(pct_execucao), container=c3,
+            tooltip="Percentual de internações efetivadas em relação às solicitadas. Verde ≥ 70%, laranja entre 40% e 69%, vermelho < 40%.",
+        )
+        kpi_card(
+            "Pacientes QT Autorizados", int(totals["pacientes_qt_autorizados"]), "no mês", container=c4,
+            tooltip="Quantidade de pacientes autorizados para quimioterapia (QT) no período selecionado.",
+        )
 
     if df_elegiveis_full is not None and not df_elegiveis_full.empty:
         elegivel_counts = (
@@ -569,14 +643,27 @@ def render_command_center(df_eletivos, skipped_tabs, df_elegiveis_full, mes, ano
         pct_aceite = calc_pct(total_elegiveis_sim, total_aceitos_sim)
 
         c5, c6, c7, c8 = st.columns(4)
-        kpi_card("Respostas Recebidas", total_registros, "formulário de elegibilidade", container=c5)
-        kpi_card("Elegíveis (Sim)", total_elegiveis_sim, color="var(--cc-green)", container=c6)
-        kpi_card("Aceitos (Sim)", total_aceitos_sim, color="var(--cc-cyan)", container=c7)
-        kpi_card("% Aceite s/ Elegíveis", f"{pct_aceite:.0f}%", "aceitos → elegíveis",
-                  color=status_color(pct_aceite), container=c8)
+        kpi_card(
+            "Respostas Recebidas", total_registros, "formulário de elegibilidade", container=c5,
+            tooltip="Total de respostas registradas no formulário de elegibilidade dentro do período filtrado.",
+        )
+        kpi_card(
+            "Elegíveis (Sim)", total_elegiveis_sim, color="var(--cc-green)", container=c6,
+            tooltip="Quantidade de pacientes marcados como 'Sim' no campo 'Elegível para HMV' do formulário.",
+        )
+        kpi_card(
+            "Aceitos (Sim)", total_aceitos_sim, color="var(--cc-cyan)", container=c7,
+            tooltip="Quantidade de pacientes marcados como 'Sim' no campo 'Paciente aceito' do formulário.",
+        )
+        kpi_card(
+            "% Aceite s/ Elegíveis", f"{pct_aceite:.0f}%", "aceitos → elegíveis",
+            color=status_color(pct_aceite), container=c8,
+            tooltip="Percentual de pacientes aceitos em relação aos elegíveis. Mesma régua de cores do % de Execução.",
+        )
     else:
         st.info("Planilha de Elegíveis não conectada — configure SPREADSHEET_KEY_ELEGIVEIS em st.secrets para ver esses indicadores aqui.")
 
+    st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
     st.markdown("#### 🏥 Ocupação e Origem")
     col_a, col_b, col_c = st.columns(3)
 
