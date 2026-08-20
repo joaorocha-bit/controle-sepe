@@ -87,10 +87,161 @@ DIMENSIONS_ELEGIVEIS = {
 DATE_COLUMN_ELEGIVEIS = "Carimbo de data/hora"
 
 
+# ---------------------------------------------------------------------------
+# PALETA / TEMA — usada em CSS e nos gráficos para manter tudo consistente
+# ---------------------------------------------------------------------------
+
+COLOR_PRIMARY = "#00e5ff"   # ciano — indicador neutro / "solicitado"
+COLOR_SUCCESS = "#00ff9d"   # verde — positivo / "efetivado" / "sim"
+COLOR_WARNING = "#ff9500"   # laranja — atenção
+COLOR_DANGER = "#ff3b5c"    # vermelho — negativo / "não"
+COLOR_MUTED = "#7e8aa3"
+TEXT_COLOR = "#e6f1ff"
+PALETTE_SEQUENCE = [COLOR_PRIMARY, COLOR_SUCCESS, COLOR_WARNING, COLOR_DANGER]
+
+
+# ---------------------------------------------------------------------------
+# HELPERS DE NEGÓCIO
+# ---------------------------------------------------------------------------
+
 def calc_pct(elegivel, efetivado):
     if elegivel and elegivel > 0:
         return (efetivado / elegivel) * 100
     return 0.0
+
+
+def status_color(pct):
+    if pct >= 70:
+        return COLOR_SUCCESS
+    if pct >= 40:
+        return COLOR_WARNING
+    return COLOR_DANGER
+
+
+def classify_acomodacao(row):
+    priv = str(row.get(COL_ACOMOD_PRIVATIVO, "")).strip()
+    semi = str(row.get(COL_ACOMOD_SEMI, "")).strip()
+    if priv and semi:
+        return "Privativo + Semi-privativo"
+    if priv:
+        return "Privativo"
+    if semi:
+        return "Semi-privativo"
+    return "Não informado"
+
+
+def build_split_counter(series, seps=r"[;,/]"):
+    """Conta ocorrências de valores separados por ; , / dentro de uma série de texto."""
+    counter = Counter()
+    for val in series:
+        val = str(val).strip()
+        if not val:
+            continue
+        for parte in re.split(seps, val):
+            parte = parte.strip()
+            if parte:
+                counter[parte] += 1
+    return counter
+
+
+def ranked_counts_df(counter, label_col, count_col="Ocorrências", top=None):
+    items = sorted(counter.items(), key=lambda x: -x[1])
+    if top:
+        items = items[:top]
+    return pd.DataFrame(items, columns=[label_col, count_col])
+
+
+# ---------------------------------------------------------------------------
+# HELPERS DE UI — componentes padronizados reutilizados nas 3 abas
+# ---------------------------------------------------------------------------
+
+def section_title(text, container=st):
+    """Cabeçalho de seção padrão (mesmo nível/estilo em todas as abas)."""
+    container.markdown(f"#### {text}")
+
+
+def kpi_card(label, value, sublabel="", color=COLOR_PRIMARY, tooltip="", container=st):
+    tooltip_attr = f'data-tooltip="{tooltip}"' if tooltip else ""
+    info_icon = '<span class="kpi-info-icon">i</span>' if tooltip else ""
+    container.markdown(
+        f"""
+        <div class="kpi-card" {tooltip_attr}>
+            <div class="kpi-label">{label}{info_icon}</div>
+            <div class="kpi-value" style="color:{color};">{value}</div>
+            <div class="kpi-sub">{sublabel}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def kpi_row(items, container=st):
+    """Renderiza uma linha de kpi_cards a partir de uma lista de dicts
+    {label, value, sublabel?, color?, tooltip?} — usado em todas as abas
+    para que os indicadores tenham sempre a mesma cara."""
+    if not items:
+        return
+    cols = container.columns(len(items))
+    for col, item in zip(cols, items):
+        kpi_card(
+            item["label"],
+            item["value"],
+            item.get("sublabel", ""),
+            color=item.get("color", COLOR_PRIMARY),
+            tooltip=item.get("tooltip", ""),
+            container=col,
+        )
+
+
+def apply_chart_theme(fig, height=260, showlegend=False):
+    """Layout padrão (fundo transparente, fonte, margens) para todo gráfico Plotly."""
+    fig.update_layout(
+        height=height,
+        margin=dict(t=10, b=10, l=10, r=10),
+        showlegend=showlegend,
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font_color=TEXT_COLOR,
+    )
+    return fig
+
+
+def horizontal_bar_chart(df, x_col, y_col, color=COLOR_PRIMARY, height=280):
+    fig = px.bar(df, x=x_col, y=y_col, orientation="h")
+    fig.update_traces(marker_color=color)
+    apply_chart_theme(fig, height=height)
+    return fig
+
+
+def render_ranked_bar(counter, label_col, container=st, color=COLOR_PRIMARY, top=None,
+                       height=260, key="", empty_msg="Sem dados preenchidos."):
+    """A partir de um Counter, monta e plota um ranking em barras horizontais —
+    usado para 'locais de origem' e 'convênios' tanto no Command Center quanto
+    na aba Eletivos."""
+    if not counter:
+        container.info(empty_msg)
+        return
+    df_rank = ranked_counts_df(counter, label_col, top=top)
+    fig = horizontal_bar_chart(df_rank, "Ocorrências", label_col, color=color, height=height)
+    container.plotly_chart(fig, use_container_width=True, key=key)
+
+
+def render_acomodacao_pie(df, container=st, height=260, key="acomod"):
+    """Gráfico de pizza de tipo de acomodação — mesmo componente usado no
+    Command Center e na aba Elegíveis, para que a visão seja idêntica nos
+    dois lugares."""
+    if COL_ACOMOD_PRIVATIVO not in df.columns and COL_ACOMOD_SEMI not in df.columns:
+        container.info("Sem dados de acomodação.")
+        return
+    acomod_series = df.apply(classify_acomodacao, axis=1)
+    acomod_counts = acomod_series.value_counts().rename_axis("Tipo").reset_index(name="Qtd")
+    fig = px.pie(
+        acomod_counts, names="Tipo", values="Qtd", hole=0.55,
+        color_discrete_sequence=PALETTE_SEQUENCE,
+    )
+    apply_chart_theme(fig, height=height, showlegend=True)
+    fig.update_layout(legend=dict(orientation="h", y=-0.15))
+    container.plotly_chart(fig, use_container_width=True, key=key)
 
 
 def render_comparisons(source, container=st, key_prefix="cmp"):
@@ -102,10 +253,14 @@ def render_comparisons(source, container=st, key_prefix="cmp"):
         chart_key = f"{key_prefix}_{campo_elegivel}_{campo_efetivado}"
 
         container.markdown(f"**{label}**")
-        c1, c2, c3 = container.columns(3)
-        c1.metric("Solicitadas/Elegíveis", int(elegivel))
-        c2.metric("Efetivadas", int(efetivado))
-        c3.metric("% de execução", f"{pct:.0f}%")
+        kpi_row(
+            [
+                {"label": "Solicitadas/Elegíveis", "value": int(elegivel)},
+                {"label": "Efetivadas", "value": int(efetivado), "color": COLOR_SUCCESS},
+                {"label": "% de execução", "value": f"{pct:.0f}%", "color": status_color(pct)},
+            ],
+            container=container,
+        )
 
         fig = px.bar(
             x=["Solicitadas/Elegíveis", "Efetivadas"],
@@ -113,17 +268,15 @@ def render_comparisons(source, container=st, key_prefix="cmp"):
             text=[int(elegivel), int(efetivado)],
             labels={"x": "", "y": ""},
         )
-        fig.update_traces(textposition="outside", marker_color=["#00e5ff", "#00ff9d"])
-        fig.update_layout(
-            height=220, margin=dict(t=10, b=10, l=10, r=10), showlegend=False,
-            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-            font_color="#e6f1ff",
-        )
+        fig.update_traces(textposition="outside", marker_color=[COLOR_PRIMARY, COLOR_SUCCESS])
+        apply_chart_theme(fig, height=220)
         container.plotly_chart(fig, use_container_width=True, key=chart_key)
         container.divider()
 
 
-def render_value_counts(df, col, label, container=st):
+def render_value_counts(df, col, label, container=st, key_prefix="vc"):
+    """Cartões de contagem para colunas categóricas (Sim/Não/etc.), com cor
+    verde/vermelho/ciano padronizada conforme a resposta."""
     if col not in df.columns:
         container.warning(f"Coluna '{col}' não encontrada na planilha.")
         return
@@ -137,9 +290,18 @@ def render_value_counts(df, col, label, container=st):
         container.info("Nenhuma resposta preenchida ainda.")
         return
 
-    metric_cols = container.columns(len(vc))
-    for mcol, (valor, qtd) in zip(metric_cols, vc.items()):
-        mcol.metric(valor, int(qtd))
+    items = []
+    for valor, qtd in vc.items():
+        val_lower = valor.strip().lower()
+        if val_lower == "sim":
+            color = COLOR_SUCCESS
+        elif val_lower in ("não", "nao"):
+            color = COLOR_DANGER
+        else:
+            color = COLOR_PRIMARY
+        items.append({"label": valor, "value": int(qtd), "color": color})
+
+    kpi_row(items, container=container)
 
 
 def render_group_breakdown(df, dim_col, value_col, container=st):
@@ -175,18 +337,6 @@ def render_group_breakdown(df, dim_col, value_col, container=st):
 
     # Exibe no Streamlit como uma tabela iterativa
     container.dataframe(tabela, use_container_width=True, hide_index=True)
-
-
-def classify_acomodacao(row):
-    priv = str(row.get(COL_ACOMOD_PRIVATIVO, "")).strip()
-    semi = str(row.get(COL_ACOMOD_SEMI, "")).strip()
-    if priv and semi:
-        return "Privativo + Semi-privativo"
-    if priv:
-        return "Privativo"
-    if semi:
-        return "Semi-privativo"
-    return "Não informado"
 
 
 # ---------------------------------------------------------------------------
@@ -413,7 +563,7 @@ def inject_theme():
             border-bottom-color: var(--cc-cyan) !important;
         }
 
-        /* st.metric nativo */
+        /* st.metric nativo (usado só em locais pontuais) */
         div[data-testid="stMetric"]{
             background: linear-gradient(145deg, #0d1526, #0a0f1c);
             border: 1px solid var(--cc-border);
@@ -434,7 +584,7 @@ def inject_theme():
             margin-bottom: 22px;
         }
 
-        /* Cards de KPI customizados */
+        /* Cards de KPI customizados — componente único usado nas 3 abas */
         .kpi-card{
             position: relative;
             background: linear-gradient(145deg, #0d1526, #0a0f1c);
@@ -532,33 +682,15 @@ def inject_theme():
             border: 1px solid var(--cc-border);
             border-radius: 8px;
         }
+
+        /* Botões de atualização de dados na sidebar */
+        .refresh-block button{
+            width: 100%;
+        }
         </style>
         """,
         unsafe_allow_html=True,
     )
-
-
-def kpi_card(label, value, sublabel="", color="var(--cc-cyan)", tooltip="", container=st):
-    tooltip_attr = f'data-tooltip="{tooltip}"' if tooltip else ""
-    info_icon = '<span class="kpi-info-icon">i</span>' if tooltip else ""
-    container.markdown(
-        f"""
-        <div class="kpi-card" {tooltip_attr}>
-            <div class="kpi-label">{label}{info_icon}</div>
-            <div class="kpi-value" style="color:{color};">{value}</div>
-            <div class="kpi-sub">{sublabel}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def status_color(pct):
-    if pct >= 70:
-        return "var(--cc-green)"
-    if pct >= 40:
-        return "var(--cc-orange)"
-    return "var(--cc-red)"
 
 
 # ---------------------------------------------------------------------------
@@ -584,7 +716,7 @@ def render_command_center(df_eletivos, skipped_tabs, df_elegiveis_full, mes, ano
         if auto_refresh:
             st.caption(f"⏱️ Tela atualiza sozinha a cada {intervalo_min} min — ideal para telão/TV.")
         else:
-            st.caption("Auto-atualização desligada. Use o botão de recarregar na barra lateral.")
+            st.caption("Auto-atualização desligada. Use os botões de atualizar na barra lateral.")
 
     if auto_refresh:
         components.html(
@@ -598,8 +730,7 @@ def render_command_center(df_eletivos, skipped_tabs, df_elegiveis_full, mes, ano
             height=0,
         )
 
-    st.markdown("#### 📌 Indicadores-chave")
-
+    section_title("📌 Indicadores-chave — Eletivos")
     if df_eletivos is None or df_eletivos.empty:
         st.info("Sem dados de Eletivos para o período selecionado — ajuste o filtro de Mês/Ano na barra lateral.")
     else:
@@ -608,25 +739,28 @@ def render_command_center(df_eletivos, skipped_tabs, df_elegiveis_full, mes, ano
         efetivado = float(totals["internacoes_eletivas_efetivadas"])
         pct_execucao = calc_pct(elegivel, efetivado)
 
-        c1, c2, c3, c4 = st.columns(4)
-        kpi_card(
-            "Internações Eletivas", int(elegivel), "solicitadas no mês", container=c1,
-            tooltip="Total de internações eletivas solicitadas no mês, somando os valores registrados em cada aba diária da planilha de Eletivos.",
-        )
-        kpi_card(
-            "Efetivadas", int(efetivado), "internações realizadas", color="var(--cc-green)", container=c2,
-            tooltip="Quantidade de internações eletivas que efetivamente aconteceram no mês (o paciente foi internado).",
-        )
-        kpi_card(
-            "% Execução", f"{pct_execucao:.0f}%", "solicitadas → efetivadas",
-            color=status_color(pct_execucao), container=c3,
-            tooltip="Percentual de internações efetivadas em relação às solicitadas. Verde ≥ 70%, laranja entre 40% e 69%, vermelho < 40%.",
-        )
-        kpi_card(
-            "Pacientes QT Autorizados", int(totals["pacientes_qt_autorizados"]), "no mês", container=c4,
-            tooltip="Quantidade de pacientes autorizados para quimioterapia (QT) no período selecionado.",
-        )
+        kpi_row([
+            {
+                "label": "Internações Eletivas", "value": int(elegivel), "sublabel": "solicitadas no mês",
+                "tooltip": "Total de internações eletivas solicitadas no mês, somando os valores registrados em cada aba diária da planilha de Eletivos.",
+            },
+            {
+                "label": "Efetivadas", "value": int(efetivado), "sublabel": "internações realizadas",
+                "color": COLOR_SUCCESS,
+                "tooltip": "Quantidade de internações eletivas que efetivamente aconteceram no mês (o paciente foi internado).",
+            },
+            {
+                "label": "% Execução", "value": f"{pct_execucao:.0f}%", "sublabel": "solicitadas → efetivadas",
+                "color": status_color(pct_execucao),
+                "tooltip": "Percentual de internações efetivadas em relação às solicitadas. Verde ≥ 70%, laranja entre 40% e 69%, vermelho < 40%.",
+            },
+            {
+                "label": "Pacientes QT Autorizados", "value": int(totals["pacientes_qt_autorizados"]), "sublabel": "no mês",
+                "tooltip": "Quantidade de pacientes autorizados para quimioterapia (QT) no período selecionado.",
+            },
+        ])
 
+    section_title("📌 Indicadores-chave — Elegíveis")
     if df_elegiveis_full is not None and not df_elegiveis_full.empty:
         elegivel_counts = (
             df_elegiveis_full[COL_ELEGIVEL].astype(str).str.strip().value_counts()
@@ -642,107 +776,60 @@ def render_command_center(df_eletivos, skipped_tabs, df_elegiveis_full, mes, ano
         total_aceitos_sim = int(aceito_counts.get("Sim", 0))
         pct_aceite = calc_pct(total_elegiveis_sim, total_aceitos_sim)
 
-        c5, c6, c7, c8 = st.columns(4)
-        kpi_card(
-            "Respostas Recebidas", total_registros, "formulário de elegibilidade", container=c5,
-            tooltip="Total de respostas registradas no formulário de elegibilidade dentro do período filtrado.",
-        )
-        kpi_card(
-            "Elegíveis (Sim)", total_elegiveis_sim, color="var(--cc-green)", container=c6,
-            tooltip="Quantidade de pacientes marcados como 'Sim' no campo 'Elegível para HMV' do formulário.",
-        )
-        kpi_card(
-            "Aceitos (Sim)", total_aceitos_sim, color="var(--cc-cyan)", container=c7,
-            tooltip="Quantidade de pacientes marcados como 'Sim' no campo 'Paciente aceito' do formulário.",
-        )
-        kpi_card(
-            "% Aceite s/ Elegíveis", f"{pct_aceite:.0f}%", "aceitos → elegíveis",
-            color=status_color(pct_aceite), container=c8,
-            tooltip="Percentual de pacientes aceitos em relação aos elegíveis. Mesma régua de cores do % de Execução.",
-        )
+        kpi_row([
+            {
+                "label": "Respostas Recebidas", "value": total_registros, "sublabel": "formulário de elegibilidade",
+                "tooltip": "Total de respostas registradas no formulário de elegibilidade dentro do período filtrado.",
+            },
+            {
+                "label": "Elegíveis (Sim)", "value": total_elegiveis_sim, "color": COLOR_SUCCESS,
+                "tooltip": "Quantidade de pacientes marcados como 'Sim' no campo 'Elegível para HMV' do formulário.",
+            },
+            {
+                "label": "Aceitos (Sim)", "value": total_aceitos_sim, "color": COLOR_PRIMARY,
+                "tooltip": "Quantidade de pacientes marcados como 'Sim' no campo 'Paciente aceito' do formulário.",
+            },
+            {
+                "label": "% Aceite s/ Elegíveis", "value": f"{pct_aceite:.0f}%", "sublabel": "aceitos → elegíveis",
+                "color": status_color(pct_aceite),
+                "tooltip": "Percentual de pacientes aceitos em relação aos elegíveis. Mesma régua de cores do % de Execução.",
+            },
+        ])
     else:
         st.info("Planilha de Elegíveis não conectada — configure SPREADSHEET_KEY_ELEGIVEIS em st.secrets para ver esses indicadores aqui.")
 
-    st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
-    st.markdown("#### 🏥 Ocupação e Origem")
+    st.divider()
+    section_title("🏥 Ocupação e Origem")
     col_a, col_b, col_c = st.columns(3)
 
     with col_a:
         st.markdown("**Tipo de acomodação (Elegíveis)**")
-        if (
-            df_elegiveis_full is not None and not df_elegiveis_full.empty
-            and (COL_ACOMOD_PRIVATIVO in df_elegiveis_full.columns or COL_ACOMOD_SEMI in df_elegiveis_full.columns)
-        ):
-            acomod_series = df_elegiveis_full.apply(classify_acomodacao, axis=1)
-            acomod_counts = acomod_series.value_counts().rename_axis("Tipo").reset_index(name="Qtd")
-            fig = px.pie(
-                acomod_counts, names="Tipo", values="Qtd", hole=0.55,
-                color_discrete_sequence=["#00e5ff", "#00ff9d", "#ff9500", "#ff3b5c"],
-            )
-            fig.update_layout(
-                margin=dict(t=10, b=10, l=10, r=10), height=260,
-                paper_bgcolor="rgba(0,0,0,0)", font_color="#e6f1ff",
-                legend=dict(orientation="h", y=-0.15),
-            )
-            st.plotly_chart(fig, use_container_width=True, key="cc_acomod")
+        if df_elegiveis_full is not None and not df_elegiveis_full.empty:
+            render_acomodacao_pie(df_elegiveis_full, container=col_a, key="cc_acomod")
         else:
-            st.info("Sem dados de acomodação.")
+            col_a.info("Sem dados de acomodação.")
 
     with col_b:
         st.markdown("**Top locais de origem (Eletivos)**")
-        origem_counter = Counter()
         if df_eletivos is not None and not df_eletivos.empty:
-            for val in df_eletivos["locais_municipios_origem"]:
-                val = str(val).strip()
-                if not val:
-                    continue
-                for parte in re.split(r"[;,/]", val):
-                    parte = parte.strip()
-                    if parte:
-                        origem_counter[parte] += 1
-        if origem_counter:
-            top_origem = pd.DataFrame(
-                sorted(origem_counter.items(), key=lambda x: -x[1])[:5],
-                columns=["Local", "Ocorrências"],
+            origem_counter = build_split_counter(df_eletivos["locais_municipios_origem"])
+            render_ranked_bar(
+                origem_counter, "Local", container=col_b, color=COLOR_PRIMARY, top=5,
+                key="cc_origem", empty_msg="Sem dados de origem.",
             )
-            fig = px.bar(top_origem, x="Ocorrências", y="Local", orientation="h",
-                          color_discrete_sequence=["#00e5ff"])
-            fig.update_layout(
-                margin=dict(t=10, b=10, l=10, r=10), height=260,
-                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                font_color="#e6f1ff",
-            )
-            st.plotly_chart(fig, use_container_width=True, key="cc_origem")
         else:
-            st.info("Sem dados de origem.")
+            col_b.info("Sem dados de origem.")
 
     with col_c:
         st.markdown("**Top convênios (Eletivos)**")
-        conv_counter = Counter()
         if df_eletivos is not None and not df_eletivos.empty:
-            for val in df_eletivos["convenios"]:
-                val = str(val).strip()
-                if not val:
-                    continue
-                for parte in re.split(r"[;,/]", val):
-                    parte = parte.strip()
-                    if parte:
-                        conv_counter[parte] += 1
-        if conv_counter:
-            top_conv = pd.DataFrame(
-                sorted(conv_counter.items(), key=lambda x: -x[1])[:5],
-                columns=["Convênio", "Ocorrências"],
+            conv_counter = build_split_counter(df_eletivos["convenios"])
+            render_ranked_bar(
+                conv_counter, "Convênio", container=col_c, color=COLOR_SUCCESS, top=5,
+                key="cc_conv", empty_msg="Sem dados de convênio.",
             )
-            fig = px.bar(top_conv, x="Ocorrências", y="Convênio", orientation="h",
-                          color_discrete_sequence=["#00ff9d"])
-            fig.update_layout(
-                margin=dict(t=10, b=10, l=10, r=10), height=260,
-                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                font_color="#e6f1ff",
-            )
-            st.plotly_chart(fig, use_container_width=True, key="cc_conv")
         else:
-            st.info("Sem dados de convênio.")
+            col_c.info("Sem dados de convênio.")
 
     st.caption(
         f"Última atualização dos dados: {now.strftime('%d/%m/%Y %H:%M:%S')} · "
@@ -759,7 +846,7 @@ inject_theme()
 st.title("📊 Dashboard de Elegibilidades e Efetivações")
 
 with st.sidebar:
-    st.header("Filtros — Eletivos")
+    st.header("📅 Filtros — Eletivos")
     today = date.today()
     ano = st.number_input("Ano", min_value=2020, max_value=2100, value=today.year, step=1)
     mes = st.selectbox(
@@ -768,19 +855,34 @@ with st.sidebar:
         index=today.month - 1,
         format_func=lambda m: calendar.month_name[m].capitalize(),
     )
-    if st.button("🔄 Recarregar dados (Eletivos)"):
-        load_data.clear()
-        st.rerun()
 
     st.divider()
-    st.header("Elegíveis")
+    st.header("🔄 Atualização de dados")
+    st.markdown('<div class="refresh-block">', unsafe_allow_html=True)
+
     elegiveis_conectado = get_spreadsheet_elegiveis() is not None
+
     if elegiveis_conectado:
-        if st.button("🔄 Recarregar dados (Elegíveis)"):
+        r1, r2 = st.columns(2)
+        with r1:
+            if st.button("Eletivos", key="refresh_eletivos"):
+                load_data.clear()
+                st.rerun()
+        with r2:
+            if st.button("Elegíveis", key="refresh_elegiveis"):
+                load_data_elegiveis.clear()
+                st.rerun()
+        if st.button("🔁 Atualizar tudo", key="refresh_all"):
+            load_data.clear()
             load_data_elegiveis.clear()
             st.rerun()
     else:
-        st.caption("Não conectado — configure SPREADSHEET_KEY_ELEGIVEIS em st.secrets.")
+        if st.button("🔄 Recarregar dados (Eletivos)", key="refresh_eletivos_only"):
+            load_data.clear()
+            st.rerun()
+        st.caption("Elegíveis não conectado — configure SPREADSHEET_KEY_ELEGIVEIS em st.secrets.")
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
 df, skipped_tabs = load_data(mes, ano)
 df_elegiveis_full = load_data_elegiveis() if elegiveis_conectado else None
@@ -807,37 +909,29 @@ with top_eletivos:
 
         # --- VISÃO GERAL -----------------------------------------------------------
         with tab_geral:
-            st.subheader(f"Totais de {calendar.month_name[mes].capitalize()}/{ano}")
+            section_title(f"📌 Indicadores-chave — {calendar.month_name[mes].capitalize()}/{ano}")
 
             totals = df[NUMERIC_FIELDS].sum()
-
-            kpi_fields = [
-                "internacoes_eletivas",
-                "internacoes_eletivas_efetivadas",
-                "pacientes_qt_autorizados",
-            ]
-            cols = st.columns(len(kpi_fields))
-            for col, field in zip(cols, kpi_fields):
-                col.metric(LABELS[field], int(totals[field]))
+            kpi_row([
+                {"label": LABELS["internacoes_eletivas"], "value": int(totals["internacoes_eletivas"])},
+                {"label": LABELS["internacoes_eletivas_efetivadas"], "value": int(totals["internacoes_eletivas_efetivadas"]), "color": COLOR_SUCCESS},
+                {"label": LABELS["pacientes_qt_autorizados"], "value": int(totals["pacientes_qt_autorizados"])},
+            ])
 
             st.divider()
 
-            st.markdown("### Comparativo Mensal")
+            section_title("⚖️ Comparativo Mensal")
             render_comparisons(totals, key_prefix="geral")
 
-            st.markdown("**Totais detalhados do mês**")
+            section_title("📊 Totais detalhados do mês")
             totals_df = pd.DataFrame({
                 "Indicador": [LABELS[f] for f in NUMERIC_FIELDS],
                 "Total": [int(totals[f]) for f in NUMERIC_FIELDS],
             }).sort_values("Total", ascending=False)
-            fig_totais = px.bar(totals_df, x="Total", y="Indicador", orientation="h")
-            fig_totais.update_traces(marker_color="#00e5ff")
-            fig_totais.update_layout(
-                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font_color="#e6f1ff"
-            )
-            st.plotly_chart(fig_totais, use_container_width=True)
+            fig_totais = horizontal_bar_chart(totals_df, "Total", "Indicador", color=COLOR_PRIMARY, height=320)
+            st.plotly_chart(fig_totais, use_container_width=True, key="geral_totais")
 
-            st.markdown("**Evolução diária**")
+            section_title("📈 Evolução diária")
             campo_evolucao = st.selectbox(
                 "Escolha o indicador",
                 options=NUMERIC_FIELDS,
@@ -846,11 +940,9 @@ with top_eletivos:
             )
             fig = px.line(df, x="data", y=campo_evolucao, markers=True,
                            labels={"data": "Dia", campo_evolucao: LABELS[campo_evolucao]})
-            fig.update_traces(line_color="#00e5ff", marker_color="#00ff9d")
-            fig.update_layout(
-                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font_color="#e6f1ff"
-            )
-            st.plotly_chart(fig, use_container_width=True)
+            fig.update_traces(line_color=COLOR_PRIMARY, marker_color=COLOR_SUCCESS)
+            apply_chart_theme(fig, height=320)
+            st.plotly_chart(fig, use_container_width=True, key="geral_evolucao")
 
             with st.expander("Ver tabela completa"):
                 display_df = df.copy()
@@ -859,7 +951,7 @@ with top_eletivos:
 
         # --- POR DIA -----------------------------------------------------------
         with tab_dia:
-            st.subheader("Consultar um dia específico")
+            section_title("📅 Consultar um dia específico")
 
             dia_escolhido = st.selectbox(
                 "Selecione o dia",
@@ -870,13 +962,14 @@ with top_eletivos:
             row = df[df["data"] == dia_escolhido].iloc[0]
             st.caption(f"Aba de origem: **{row['aba']}**")
 
-            c1, c2, c3 = st.columns(3)
-            c1.metric(LABELS["internacoes_eletivas"], int(row["internacoes_eletivas"]))
-            c2.metric(LABELS["internacoes_eletivas_efetivadas"], int(row["internacoes_eletivas_efetivadas"]))
-            c3.metric(LABELS["pacientes_qt_autorizados"], int(row["pacientes_qt_autorizados"]))
+            kpi_row([
+                {"label": LABELS["internacoes_eletivas"], "value": int(row["internacoes_eletivas"])},
+                {"label": LABELS["internacoes_eletivas_efetivadas"], "value": int(row["internacoes_eletivas_efetivadas"]), "color": COLOR_SUCCESS},
+                {"label": LABELS["pacientes_qt_autorizados"], "value": int(row["pacientes_qt_autorizados"])},
+            ])
 
             st.divider()
-            st.markdown("### Comparativo do dia")
+            section_title("⚖️ Comparativo do dia")
             render_comparisons(row, key_prefix=f"dia_{dia_escolhido.isoformat()}")
 
             detalhe = pd.DataFrame({
@@ -892,66 +985,31 @@ with top_eletivos:
 
         # --- POR LOCAL / CONVÊNIO ------------------------------------------------
         with tab_local:
+            section_title("📍 Locais / Municípios de Origem e Convênios")
             c_loc, c_conv = st.columns(2)
 
             with c_loc:
-                st.subheader("Locais / Municípios de Origem")
-                origem_counter = Counter()
-                for val in df["locais_municipios_origem"]:
-                    val = str(val).strip()
-                    if not val:
-                        continue
-                    for parte in re.split(r"[;,/]", val):
-                        parte = parte.strip()
-                        if parte:
-                            origem_counter[parte] += 1
-
-                if origem_counter:
-                    origem_df = pd.DataFrame(
-                        sorted(origem_counter.items(), key=lambda x: -x[1]),
-                        columns=["Local", "Ocorrências"],
-                    )
-                    fig_o = px.bar(origem_df, x="Ocorrências", y="Local", orientation="h")
-                    fig_o.update_traces(marker_color="#00e5ff")
-                    fig_o.update_layout(
-                        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font_color="#e6f1ff"
-                    )
-                    st.plotly_chart(fig_o, use_container_width=True)
-                else:
-                    st.info("Nenhum local preenchido.")
+                st.markdown("**Locais / Municípios de Origem**")
+                origem_counter = build_split_counter(df["locais_municipios_origem"])
+                render_ranked_bar(
+                    origem_counter, "Local", container=c_loc, color=COLOR_PRIMARY,
+                    height=320, key="local_origem", empty_msg="Nenhum local preenchido.",
+                )
 
             with c_conv:
-                st.subheader("Convênios")
-                conv_counter = Counter()
-                for val in df["convenios"]:
-                    val = str(val).strip()
-                    if not val:
-                        continue
-                    for parte in re.split(r"[;,/]", val):
-                        parte = parte.strip()
-                        if parte:
-                            conv_counter[parte] += 1
-
-                if conv_counter:
-                    conv_df = pd.DataFrame(
-                        sorted(conv_counter.items(), key=lambda x: -x[1]),
-                        columns=["Convênio", "Ocorrências"],
-                    )
-                    fig_c = px.bar(conv_df, x="Ocorrências", y="Convênio", orientation="h",
-                                    color_discrete_sequence=["#00ff9d"])
-                    fig_c.update_layout(
-                        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font_color="#e6f1ff"
-                    )
-                    st.plotly_chart(fig_c, use_container_width=True)
-                else:
-                    st.info("Nenhum convênio preenchido.")
+                st.markdown("**Convênios**")
+                conv_counter = build_split_counter(df["convenios"])
+                render_ranked_bar(
+                    conv_counter, "Convênio", container=c_conv, color=COLOR_SUCCESS,
+                    height=320, key="local_conv", empty_msg="Nenhum convênio preenchido.",
+                )
 
 
 # =============================================================================
 # ABA "ELEGÍVEIS"
 # =============================================================================
 with top_elegiveis:
-    st.subheader("Elegíveis")
+    section_title("📝 Elegíveis")
 
     if not elegiveis_conectado:
         st.info("Planilha não conectada. Configure as chaves SPREADSHEET_KEY_ELEGIVEIS no st.secrets.")
@@ -974,16 +1032,17 @@ with top_elegiveis:
                     mask = df_elegiveis[DATE_COLUMN_ELEGIVEIS].dt.date.between(inicio, fim)
                     df_elegiveis = df_elegiveis[mask]
 
-        st.markdown("### Elegibilidade e aceite")
+        st.divider()
+        section_title("📌 Elegibilidade e aceite")
         c1, c2 = st.columns(2)
         with c1:
-            render_value_counts(df_elegiveis, COL_ELEGIVEL, "Elegível para HMV", container=c1)
+            render_value_counts(df_elegiveis, COL_ELEGIVEL, "Elegível para HMV", container=c1, key_prefix="eleg")
         with c2:
-            render_value_counts(df_elegiveis, COL_ACEITO, "Paciente aceito", container=c2)
+            render_value_counts(df_elegiveis, COL_ACEITO, "Paciente aceito", container=c2, key_prefix="aceito")
 
         st.divider()
 
-        st.markdown("### Elegíveis e aceitos por grupo")
+        section_title("🌍 Elegíveis e aceitos por grupo")
         dim_label = st.selectbox("Segregar por", options=list(DIMENSIONS_ELEGIVEIS.keys()), key="dim_elegiveis")
         dim_col = DIMENSIONS_ELEGIVEIS[dim_label]
 
@@ -1000,23 +1059,9 @@ with top_elegiveis:
 
         st.divider()
 
-        st.markdown("### Tipo de acomodação")
-        if COL_ACOMOD_PRIVATIVO in df_elegiveis.columns or COL_ACOMOD_SEMI in df_elegiveis.columns:
-            acomod_series = df_elegiveis.apply(classify_acomodacao, axis=1)
-            acomod_counts = (
-                acomod_series.value_counts()
-                .rename_axis("Tipo de acomodação")
-                .reset_index(name="Quantidade")
-            )
-            fig_a = px.bar(acomod_counts, x="Quantidade", y="Tipo de acomodação", orientation="h")
-            fig_a.update_traces(marker_color="#00e5ff")
-            fig_a.update_layout(
-                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font_color="#e6f1ff"
-            )
-            st.plotly_chart(fig_a, use_container_width=True)
-        else:
-            st.warning("Colunas de tipo de acomodação não encontradas na planilha.")
+        section_title("🏨 Tipo de acomodação")
+        render_acomodacao_pie(df_elegiveis, container=st, height=300, key="elegiveis_acomod")
 
         st.divider()
-        st.markdown("### Base completa de respostas")
+        section_title("📄 Base completa de respostas")
         st.dataframe(df_elegiveis, use_container_width=True)
