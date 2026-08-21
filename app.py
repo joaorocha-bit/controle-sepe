@@ -777,8 +777,8 @@ def render_command_center(df_eletivos, skipped_tabs, df_elegiveis_full, mes, ano
         )
 
         total_registros = len(df_elegiveis_full)
-        total_elegiveis_sim = int(elegivel_counts.get("Sim", 0))
-        total_aceitos_sim = int(aceito_counts.get("Sim", 0))
+        total_elegiveis_sim = int(elegivel_counts.get("SIM", 0))
+        total_aceitos_sim = int(aceito_counts.get("SIM", 0))
         pct_aceite = calc_pct(total_elegiveis_sim, total_aceitos_sim)
 
         kpi_row([
