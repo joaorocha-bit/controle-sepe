@@ -805,37 +805,54 @@ def render_command_center(df_eletivos, skipped_tabs, df_elegiveis_full, mes, ano
 
     st.divider()
     section_title("🏥 Ocupação e Origem")
-    col_a, col_b, col_c = st.columns(3)
+    
+    # Criando 4 colunas para a nova ordem
+    col_a, col_b, col_c, col_d = st.columns(4)
 
+    # 1. Local Origem (Eletivos)
     with col_a:
-        st.markdown("**Tipo de acomodação (Elegíveis)**")
-        if df_elegiveis_full is not None and not df_elegiveis_full.empty:
-            render_acomodacao_pie(df_elegiveis_full, container=col_a, key="cc_acomod")
-        else:
-            col_a.info("Sem dados de acomodação.")
-
-    with col_b:
         st.markdown("**Top locais de origem (Eletivos)**")
         if df_eletivos is not None and not df_eletivos.empty:
             origem_counter = build_split_counter(df_eletivos["locais_municipios_origem"])
             render_ranked_bar(
-                origem_counter, "Local", container=col_b, color=COLOR_PRIMARY, top=5,
+                origem_counter, "Local", container=col_a, color=COLOR_PRIMARY, top=5,
                 key="cc_origem", empty_msg="Sem dados de origem.",
             )
         else:
-            col_b.info("Sem dados de origem.")
+            col_a.info("Sem dados de origem.")
 
+    # 2. Local Destino / Entrada HMV (Elegíveis)
+    with col_b:
+        st.markdown("**Local destino HMV (Elegíveis)**")
+        if df_elegiveis_full is not None and not df_elegiveis_full.empty and COL_LOCAL_ENTRADA in df_elegiveis_full.columns:
+            destino_counter = build_split_counter(df_elegiveis_full[COL_LOCAL_ENTRADA])
+            render_ranked_bar(
+                destino_counter, "Destino", container=col_b, color=COLOR_WARNING, top=5,
+                key="cc_destino", empty_msg="Sem dados de destino.",
+            )
+        else:
+            col_b.info("Sem dados de destino.")
+
+    # 3. Acomodação (Elegíveis)
     with col_c:
+        st.markdown("**Tipo de acomodação (Elegíveis)**")
+        if df_elegiveis_full is not None and not df_elegiveis_full.empty:
+            render_acomodacao_pie(df_elegiveis_full, container=col_c, key="cc_acomod")
+        else:
+            col_c.info("Sem dados de acomodação.")
+
+    # 4. Convênio (Eletivos)
+    with col_d:
         st.markdown("**Top convênios (Eletivos)**")
         if df_eletivos is not None and not df_eletivos.empty:
             conv_counter = build_split_counter(df_eletivos["convenios"])
             render_ranked_bar(
-                conv_counter, "Convênio", container=col_c, color=COLOR_SUCCESS, top=5,
+                conv_counter, "Convênio", container=col_d, color=COLOR_SUCCESS, top=5,
                 key="cc_conv", empty_msg="Sem dados de convênio.",
             )
         else:
-            col_c.info("Sem dados de convênio.")
-
+            col_d.info("Sem dados de convênio.")
+            
     st.caption(
         f"Última atualização dos dados: {now.strftime('%d/%m/%Y %H:%M:%S')} · "
         f"cache renovado a cada 5 min · {len(skipped_tabs or [])} aba(s) ignorada(s) no período."
