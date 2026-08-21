@@ -1,4 +1,3 @@
-mkdir -p /home/claude && cat > /home/claude/dashboard.py << 'PYEOF'
 """
 Dashboard de Elegibilidades / Efetivações — lê planilhas do Google Sheets
 e monta um painel interativo com Streamlit + Plotly.
