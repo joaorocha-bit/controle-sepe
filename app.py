@@ -471,6 +471,9 @@ def load_data(month: int, year: int):
     df = pd.DataFrame(rows).sort_values("data").reset_index(drop=True)
 
     for field in NUMERIC_FIELDS:
+        if field not in df.columns:
+            df[field] = 0
+            continue
         df[field] = (
             df[field]
             .astype(str)
@@ -736,7 +739,7 @@ def render_command_center(df_eletivos, skipped_tabs, df_elegiveis_full, mes, ano
     if df_eletivos is None or df_eletivos.empty:
         st.info("Sem dados de Eletivos para o período selecionado — ajuste o filtro de Mês/Ano na barra lateral.")
     else:
-        totals = df_eletivos[NUMERIC_FIELDS].sum()
+        totals = df_eletivos.reindex(columns=NUMERIC_FIELDS, fill_value=0).sum()
         elegivel = float(totals["internacoes_eletivas"])
         efetivado = float(totals["internacoes_eletivas_efetivadas"])
         pct_execucao = calc_pct(elegivel, efetivado)
@@ -913,7 +916,7 @@ with top_eletivos:
         with tab_geral:
             section_title(f"📌 Indicadores-chave — {calendar.month_name[mes].capitalize()}/{ano}")
 
-            totals = df[NUMERIC_FIELDS].sum()
+            totals = df.reindex(columns=NUMERIC_FIELDS, fill_value=0).sum()
             kpi_row([
                 {"label": LABELS["internacoes_eletivas"], "value": int(totals["internacoes_eletivas"])},
                 {"label": LABELS["internacoes_eletivas_efetivadas"], "value": int(totals["internacoes_eletivas_efetivadas"]), "color": COLOR_SUCCESS},
