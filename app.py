@@ -27,10 +27,11 @@ CELL_MAP = {
     "clinicos_ui": "B3:D3",
     "clinicos_ctia": "B4:D4",
     "clinicos_utip": "B5:D5",
-    "locais_municipios_origem": "B6:Z6",
-    "convenios": "B7:Z7",
-    "acomodacoes_semi": "B8:D8",
-    "acomodacoes_apto": "B9:D9",
+    "clinicos_neo": "B6:D6",
+    "locais_municipios_origem": "B7:Z7",
+    "convenios": "B8:Z8",
+    "acomodacoes_semi": "B9:D9",
+    "acomodacoes_apto": "B10:D10",
 }
 
 # Campos cujas células NÃO são mescladas (valores em sequência pro lado)
@@ -44,6 +45,7 @@ LABELS = {
     "clinicos_ui": "Clínicos para UI",
     "clinicos_ctia": "Clínicos para CTIA",
     "clinicos_utip": "Clínicos para UTIP",
+    "clinicos_neo": "Clínicos para NEO",
     "acomodacoes_semi": "Acomodações SEMI",
     "acomodacoes_apto": "Acomodações APTO",
 }
