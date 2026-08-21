@@ -77,7 +77,7 @@ COL_ACOMOD_PRIVATIVO = "TIPO DE ACOMODAÇÃO: [Privativo]"
 COL_ACOMOD_SEMI = "TIPO DE ACOMODAÇÃO: [Semi-privativo]"
 
 # Esta constante será forçada no índice 20 (Coluna U) dentro do load_data_elegiveis
-COL_CIDADE = "CIDADE_DE_PARA_COLUNA_U"
+COL_CIDADE = "CIDADE_DE_PARA_COLUNA_Y"
 
 DIMENSIONS_ELEGIVEIS = {
     "Local de origem": COL_ORIGEM,
@@ -506,8 +506,8 @@ def load_data_elegiveis(worksheet_name: str | None = None):
 
     # GARANTE A LEITURA DA COLUNA U: Substitui o nome do cabeçalho da coluna 20 (U)
     # pelo nosso rótulo padrão interno, ignorando qual texto está de fato na planilha.
-    if len(header) > 20:
-        header[20] = COL_CIDADE
+    if len(header) > 25:
+        header[25] = COL_CIDADE
 
     df = pd.DataFrame(values[1:], columns=header)
 
