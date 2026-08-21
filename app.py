@@ -1,9 +1,12 @@
+mkdir -p /home/claude && cat > /home/claude/dashboard.py << 'PYEOF'
 """
 Dashboard de Elegibilidades / Efetivações — lê planilhas do Google Sheets
 e monta um painel interativo com Streamlit + Plotly.
 """
 
 import re
+import json
+import uuid
 import calendar
 from datetime import date, datetime
 from collections import Counter
@@ -57,8 +60,8 @@ COMPARISONS = [
 ]
 
 SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets.readonly",
-    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive",
 ]
 
 
@@ -100,6 +103,13 @@ COLOR_DANGER = "#ff3b5c"    # vermelho — negativo / "não"
 COLOR_MUTED = "#7e8aa3"
 TEXT_COLOR = "#e6f1ff"
 PALETTE_SEQUENCE = [COLOR_PRIMARY, COLOR_SUCCESS, COLOR_WARNING, COLOR_DANGER]
+
+COLOR_CHOICES = {
+    "Ciano": COLOR_PRIMARY,
+    "Verde": COLOR_SUCCESS,
+    "Laranja": COLOR_WARNING,
+    "Vermelho": COLOR_DANGER,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -376,6 +386,203 @@ def get_spreadsheet_elegiveis():
     return client.open_by_url(sheet_url)
 
 
+# ---------------------------------------------------------------------------
+# PAINÉIS PERSONALIZADOS DO COMMAND CENTER — configuração editável e
+# permanente (fica salva numa aba oculta "_config_paineis" da própria
+# planilha de Eletivos, usando a mesma conexão gspread já existente).
+# ---------------------------------------------------------------------------
+
+CONFIG_WORKSHEET_NAME = "_config_paineis"
+CONFIG_CELL = "A1"
+
+PAINEL_FONTES = {
+    "Indicador Eletivos — total do mês (KPI)": "eletivos_kpi",
+    "Indicador Eletivos — evolução diária (linha)": "eletivos_linha",
+    "Ranking Eletivos — Locais/Convênios (barras)": "eletivos_ranking",
+    "Coluna do formulário Elegíveis — contagem (KPI)": "elegiveis_contagem",
+    "Coluna do formulário Elegíveis — segregada por dimensão (tabela)": "elegiveis_segregada",
+}
+
+
+@st.cache_resource(show_spinner=False)
+def _get_config_worksheet():
+    """Retorna a aba de configuração dos painéis, criando-a se não existir."""
+    ss = get_spreadsheet()
+    try:
+        ws = ss.worksheet(CONFIG_WORKSHEET_NAME)
+    except gspread.exceptions.WorksheetNotFound:
+        ws = ss.add_worksheet(title=CONFIG_WORKSHEET_NAME, rows=2, cols=2)
+        ws.update_acell(CONFIG_CELL, "[]")
+        try:
+            ws.hide()
+        except Exception:
+            pass
+    return ws
+
+
+def _read_panels_from_sheet():
+    ws = _get_config_worksheet()
+    raw = ws.acell(CONFIG_CELL).value or "[]"
+    try:
+        panels = json.loads(raw)
+        if isinstance(panels, list):
+            return panels
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return []
+
+
+def load_panels():
+    """Carrega a lista de painéis personalizados. Lê da planilha só uma vez
+    por sessão (fica em session_state); depois disso qualquer alteração
+    (adicionar/remover) atualiza tanto a sessão quanto a planilha, então o
+    painel continua lá mesmo se a página for recarregada ou reaberta depois."""
+    if "custom_panels" not in st.session_state:
+        st.session_state.custom_panels = _read_panels_from_sheet()
+    return st.session_state.custom_panels
+
+
+def save_panels(panels):
+    st.session_state.custom_panels = panels
+    ws = _get_config_worksheet()
+    ws.update_acell(CONFIG_CELL, json.dumps(panels, ensure_ascii=False))
+
+
+def render_panel_config_ui(df_eletivos, df_elegiveis_full, container=st):
+    """UI para adicionar/remover painéis personalizados no Command Center."""
+    with container.expander("⚙️ Configurar painéis personalizados", expanded=False):
+        st.caption(
+            "Monte painéis extras usando qualquer indicador das planilhas de "
+            "Eletivos ou Elegíveis. As configurações ficam salvas numa aba oculta "
+            "da própria planilha ('_config_paineis'), então continuam aqui mesmo "
+            "depois de recarregar a página ou reabrir o app em outro dia."
+        )
+
+        panels = load_panels()
+
+        with st.form("form_novo_painel", clear_on_submit=True):
+            titulo = st.text_input("Título do painel")
+            fonte_label = st.selectbox("Fonte de dados", options=list(PAINEL_FONTES.keys()))
+            fonte = PAINEL_FONTES[fonte_label]
+
+            campo = None
+            dimensao_label = None
+
+            if fonte in ("eletivos_kpi", "eletivos_linha"):
+                campo = st.selectbox(
+                    "Indicador (Eletivos)", options=NUMERIC_FIELDS,
+                    format_func=lambda f: LABELS.get(f, f),
+                )
+            elif fonte == "eletivos_ranking":
+                campo = st.selectbox(
+                    "Campo (Eletivos)", options=SEQUENCE_FIELDS,
+                    format_func=lambda f: "Locais/Municípios de origem" if f == "locais_municipios_origem" else "Convênios",
+                )
+            elif fonte in ("elegiveis_contagem", "elegiveis_segregada"):
+                if df_elegiveis_full is not None and not df_elegiveis_full.empty:
+                    campo = st.selectbox("Coluna (Elegíveis)", options=list(df_elegiveis_full.columns))
+                else:
+                    st.warning("Conecte a planilha de Elegíveis (SPREADSHEET_KEY_ELEGIVEIS) para usar esta fonte.")
+
+            if fonte == "elegiveis_segregada":
+                dimensao_label = st.selectbox("Segregar por", options=list(DIMENSIONS_ELEGIVEIS.keys()))
+
+            cor_label = st.selectbox("Cor", options=list(COLOR_CHOICES.keys()))
+
+            enviado = st.form_submit_button("➕ Adicionar painel")
+            if enviado:
+                if not titulo:
+                    st.warning("Dê um título ao painel.")
+                elif campo is None:
+                    st.warning("Selecione um campo válido para essa fonte.")
+                else:
+                    novo = {
+                        "id": uuid.uuid4().hex[:8],
+                        "titulo": titulo,
+                        "fonte": fonte,
+                        "campo": campo,
+                        "dimensao": DIMENSIONS_ELEGIVEIS.get(dimensao_label) if dimensao_label else None,
+                        "cor": COLOR_CHOICES[cor_label],
+                    }
+                    panels = panels + [novo]
+                    save_panels(panels)
+                    st.success(f"Painel '{titulo}' adicionado.")
+                    st.rerun()
+
+        panels = load_panels()
+        if panels:
+            st.markdown("**Painéis atuais:**")
+            for p in panels:
+                c1, c2 = st.columns([5, 1])
+                c1.write(f"• {p['titulo']}")
+                if c2.button("🗑️ Remover", key=f"del_{p['id']}"):
+                    panels = [x for x in panels if x["id"] != p["id"]]
+                    save_panels(panels)
+                    st.rerun()
+        else:
+            st.caption("Nenhum painel personalizado adicionado ainda.")
+
+
+def render_custom_panel(panel, df_eletivos, df_elegiveis_full, container=st):
+    """Renderiza um único painel personalizado de acordo com sua fonte."""
+    container.markdown(f"**{panel['titulo']}**")
+    fonte = panel["fonte"]
+    campo = panel["campo"]
+    cor = panel.get("cor", COLOR_PRIMARY)
+    key = f"custom_{panel['id']}"
+
+    if fonte == "eletivos_kpi":
+        if df_eletivos is None or df_eletivos.empty or campo not in df_eletivos.columns:
+            container.info("Sem dados de Eletivos no período selecionado.")
+            return
+        total = float(df_eletivos[campo].sum())
+        kpi_row([{"label": LABELS.get(campo, campo), "value": int(total), "color": cor}], container=container)
+
+    elif fonte == "eletivos_linha":
+        if df_eletivos is None or df_eletivos.empty or campo not in df_eletivos.columns:
+            container.info("Sem dados de Eletivos no período selecionado.")
+            return
+        fig = px.line(df_eletivos, x="data", y=campo, markers=True,
+                       labels={"data": "Dia", campo: LABELS.get(campo, campo)})
+        fig.update_traces(line_color=cor, marker_color=cor)
+        apply_chart_theme(fig, height=260)
+        container.plotly_chart(fig, use_container_width=True, key=key)
+
+    elif fonte == "eletivos_ranking":
+        if df_eletivos is None or df_eletivos.empty or campo not in df_eletivos.columns:
+            container.info("Sem dados de Eletivos no período selecionado.")
+            return
+        counter = build_split_counter(df_eletivos[campo])
+        render_ranked_bar(counter, "Item", container=container, color=cor, top=8, key=key)
+
+    elif fonte == "elegiveis_contagem":
+        if df_elegiveis_full is None or df_elegiveis_full.empty:
+            container.info("Sem dados de Elegíveis.")
+            return
+        render_value_counts(df_elegiveis_full, campo, campo, container=container, key_prefix=key)
+
+    elif fonte == "elegiveis_segregada":
+        if df_elegiveis_full is None or df_elegiveis_full.empty:
+            container.info("Sem dados de Elegíveis.")
+            return
+        dim_col = panel.get("dimensao") or COL_ORIGEM
+        if dim_col not in df_elegiveis_full.columns:
+            container.warning(f"Coluna '{dim_col}' não encontrada na planilha.")
+            return
+        render_group_breakdown(df_elegiveis_full, dim_col, campo, container=container)
+
+    else:
+        container.info("Fonte de painel desconhecida.")
+
+
+def render_custom_panels_grid(panels, df_eletivos, df_elegiveis_full, container=st, cols_per_row=3):
+    for i in range(0, len(panels), cols_per_row):
+        row_panels = panels[i:i + cols_per_row]
+        cols = container.columns(len(row_panels))
+        for col, p in zip(cols, row_panels):
+            render_custom_panel(p, df_eletivos, df_elegiveis_full, container=col)
+
+
 def _cell_ref_to_rowcol(ref: str):
     return gspread.utils.a1_to_rowcol(ref)
 
@@ -449,6 +656,8 @@ def load_data(month: int, year: int):
     skipped = []
 
     for ws in ss.worksheets():
+        if ws.title == CONFIG_WORKSHEET_NAME:
+            continue
         day = parse_day_from_title(ws.title, month, year)
         if day is None:
             skipped.append(ws.title)
@@ -835,6 +1044,14 @@ def render_command_center(df_eletivos, skipped_tabs, df_elegiveis_full, mes, ano
             )
         else:
             col_c.info("Sem dados de convênio.")
+
+    st.divider()
+    section_title("🧩 Painéis personalizados")
+    render_panel_config_ui(df_eletivos, df_elegiveis_full, container=st)
+
+    custom_panels = load_panels()
+    if custom_panels:
+        render_custom_panels_grid(custom_panels, df_eletivos, df_elegiveis_full, container=st)
 
     st.caption(
         f"Última atualização dos dados: {now.strftime('%d/%m/%Y %H:%M:%S')} · "
