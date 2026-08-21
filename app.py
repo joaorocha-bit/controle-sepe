@@ -77,7 +77,7 @@ COL_ACOMOD_PRIVATIVO = "TIPO DE ACOMODAÇÃO: [Privativo]"
 COL_ACOMOD_SEMI = "TIPO DE ACOMODAÇÃO: [Semi-privativo]"
 
 # Esta constante será forçada no índice 20 (Coluna U) dentro do load_data_elegiveis
-COL_CIDADE = "CIDADE_DE_PARA_COLUNA_U"
+COL_CIDADE = "CIDADE"
 
 DIMENSIONS_ELEGIVEIS = {
     "Local de origem": COL_ORIGEM,
