@@ -707,7 +707,7 @@ def render_command_center(df_eletivos, skipped_tabs, df_elegiveis_full, mes, ano
 
     head_l, head_r = st.columns([3, 1])
     with head_l:
-        st.markdown(f"### 🎛️ Painel de Comando — {calendar.month_name[mes].capitalize()}/{ano}")
+        st.markdown(f"### Painel de Comando - CEPE")
     with head_r:
         st.markdown(f"<div class='cc-clock'>🕒 {now.strftime('%d/%m/%Y %H:%M:%S')}</div>", unsafe_allow_html=True)
     st.markdown("<div class='cc-divider'></div>", unsafe_allow_html=True)
